@@ -1,0 +1,332 @@
+
+#include "DHT.h"
+#define DHTPIN A0     // what pin we're connected to
+#define DHTTYPE DHT22   // DHT 11 
+DHT dht(DHTPIN, DHTTYPE);
+
+//#include <OneWire.h>
+
+#include <SPI.h>
+#include <Ethernet2.h>
+#define SDCARD_CS 4
+#define _maxCicle 59
+
+int _nsonda = 1;
+
+byte mac[] = {
+  0x90, 0xA2, 0xDA, 0x10, 0x1E, 0x58 + _nsonda
+};
+IPAddress ip(192, 168, 1, 240 + _nsonda);
+IPAddress Yun(192, 168, 1, 240);
+// initialize the library instance:
+EthernetClient client;
+EthernetServer server(80);
+
+volatile byte LCounterT = 0;
+volatile byte LCounterH = 0;
+float Lecturas[3] = {0,0, 0};
+float _old[2] = {0,0};
+float Last[4] = {0, 0 , 0, 0};
+
+String tipo_sonda = "SHT11";
+
+boolean lastConnected = false;                 // state of the connection last time through the main loop
+unsigned long lastConnectionTime = 0;          // last time you connected to the server, in milliseconds
+boolean ConnectionFail = false;                 // state of the connection last time through the main loop
+boolean InitSonda = true;                 // state of the connection last time through the main loop
+
+char buf[35] = "                                  ";
+
+    #define NroDimmers   6
+    int values[] = {    // set values channel output level (0 = 100%, 50 = 0%)
+      0, // Output 0
+      0, // output 1
+      0, // output 2
+      0, // output 3
+      0, // output 4
+      0, // output 5
+      0, // output 6
+      0, // output 7
+    };
+
+    int output [] = { // assign a pin for each channel.
+      3, // Output 0
+      5, // output 1
+      6, // output 2
+      9, // output 3
+      4, // output 4
+      7, // output 5
+      0, // output 6
+      0, // output 7
+    };
+
+
+float _t;
+
+  
+void setup(void) {
+  
+  Serial.begin(9600);
+  
+  //pinMode(SDCARD_CS,OUTPUT);
+  //digitalWrite(SDCARD_CS,HIGH);//Deselect the SD card
+  // give the ethernet module time to boot up:
+  delay(5000);
+  // start the Ethernet connection using a fixed IP address and DNS server:
+  
+  Ethernet.begin(mac,ip);
+  // print the Ethernet board/shield's IP address:
+  Serial.print("My IP address: ");
+  Serial.println(Ethernet.localIP());
+  server.begin();
+  
+  dht.begin();
+  //Serial.println("SONDA DHT11 ");
+  int c1=0;
+  // Initialize the channel outputs (triacs)
+  for (c1 = 0; c1 <= NroDimmers; c1++) {// we traverse the 8 channels to configure
+    pinMode(output[c1], OUTPUT); // we associate each channel has a pin, which sets the output digital
+    //lightOFF(output[c1]); // and we switch off the output
+  } 
+  //  clock.begin();
+  lastConnectionTime = getTime();
+}
+
+void loop(){
+  if (client.available()) {
+    char c = client.read();
+    Serial.print(c);
+  }else{
+    Serial.print(".");
+    delay(1000);
+    GetData();
+  }
+
+  if (!client.connected() && lastConnected) {
+    Serial.println();
+    Serial.println("disconnecting.");
+    client.stop();
+  }
+
+
+  www();
+  lastConnected = client.connected();
+}
+
+void GetData(void) {
+  float h = 0;
+  float t = 0;
+  t = dht.readTemperature();
+  h = dht.readHumidity();
+  if( isnan(t) || isnan(h) ){
+    Serial.println("Error de Lectura");
+  }else{
+    if ( h>0 ) {
+      Lecturas[2] =  Lecturas[2] + h;
+      LCounterH = LCounterH + 1;
+    }else{
+      Lecturas[2] = 0;
+      LCounterH = 0;
+    }
+    
+    Lecturas[0] = Lecturas[0] + t;
+    LCounterT = LCounterT + 1;
+    SetData();
+
+  }
+  return;
+ 
+  
+}
+void SetData(){
+    boolean _send = false;
+    float _tiempo = millis() - lastConnectionTime ; 
+    Last[0] = Lecturas[0]/LCounterT;
+    
+    if(Lecturas[2]>0){
+         Last[2] = Lecturas[2]/LCounterH; 
+    }
+
+    if( _tiempo > 60000) {  
+         if(_old[0] != Last[0] || ConnectionFail ){
+            _send = true;           
+         }
+         Last[1] = Last[0] - _old[0];
+         Last[3] = Last[2] - _old[1];
+         
+         if(Last[1]<=0.5 || Last[1]>=0.5){
+            _old[0] = Last[0];
+         }
+         if(Last[3]<=0.5 || Last[3]>=0.5){
+            _old[1] = Last[3];
+         }         
+         if(_send){
+            httpRequest( UrlEncodedata() ); 
+         }else{
+            Serial.println( UrlEncodedata() );
+         }
+
+         LCounterT = 0;
+         LCounterH = 0;
+         Lecturas[0]=0;
+         Lecturas[2]=0;
+       
+         lastConnectionTime = getTime();
+
+    
+   }
+}
+String UrlEncodedata (){
+   String _exit = "&_s=" + String(_nsonda);
+   
+  _exit = _exit + "&H=" + Last[2] + "&T=" + Last[0] + + "&_vt=" + Last[1] + "&_vh=" + Last[3];;
+  _exit = _exit  + "&type=SHT11&_le=" + LCounterT;
+   
+   if(InitSonda){
+        _exit = _exit + "&_Go=1";
+        InitSonda= false;
+   }else{
+        _exit = _exit + "&_Go=0";       
+   }
+   return _exit;
+}
+unsigned long getTime(){
+   return millis();
+}
+
+
+void www() {
+  String out = "{ ""OK"":""1"" ,""H"":""" + String(Last[2]); 
+  out +=  """,""T"":""" + String(Last[0]) + """}";
+  Serial.println(out);
+  
+  EthernetClient _client = server.available();
+  if (_client) {
+    Serial.println("new client");
+    // an http request ends with a blank line
+    boolean currentLineIsBlank = true;
+    char blank[4] = " \n\r";
+    int i=0;
+    for(i=0;i<35;i++){
+        buf[i] = blank[0];
+    }
+    i=0;    
+    while (_client.connected()) {
+      if (_client.available()) {
+        char c = _client.read();
+        if(c!= blank[1] && c!=blank[2] && i<=28){
+               buf[i] = c;
+               i++;
+        }else{
+            //Serial.write(c);
+            // if you've gotten to the end of the line (received a newline
+            // character) and the line is blank, the http request has ended,
+            // so you can send a reply
+            if (c == '\n' && currentLineIsBlank) {
+              // send a standard http response header
+              decodeUrl();
+              _client.println("HTTP/1.1 200 OK");
+              _client.println("Content-Type: application/json");
+              _client.println("Connnection: close");
+              _client.println( out );
+              Serial.print("Write JSON");
+              //_client.println("<!DOCTYPE HTML>");
+              //_client.println("<html>");
+              //_client.println(UrlEncodedata());
+                        // add a meta refresh tag, so the browser pulls again every 5 seconds:
+              //_client.println("</html>");
+              break;
+            }
+            if (c == '\n') {
+              // you're starting a new line
+              currentLineIsBlank = true;
+            } 
+            else if (c != '\r') {
+              // you've gotten a character on the current line
+              currentLineIsBlank = false;
+            }
+        }
+      }
+    }
+    // give the web browser time to receive the data
+    delay(1);
+    // close the connection:
+    _client.stop();
+    Serial.println("client disconnected");
+  }
+}
+
+void decodeUrl(){
+  // read a frame type: "D / aaa / bbb / F
+  // Or "D" starting character frame
+  // Or "yyyy" No output which is set to modify
+  // Or "bbbb" new set of output (between 0 and 100%)
+  
+  int n1 = 0;
+  int n2 = 0;
+  char c1, c2;
+  int n;
+  
+  char p1[10];
+  int S[6];
+
+  String cadena;
+  for(n==0;n<15;n++){
+    cadena += buf[n];
+  }
+   Serial.print(buf);
+   sscanf(buf, "%s /%c/%d/%d/%d/%d/%d/%d/%c", &p1,&c1,&S[0],&S[1],&S[2],&S[3],&S[4],&S[5],&c2); // decoding frame
+
+
+  if (c1 == 'D' && c2 == 'F') {    // Check if the plot starts out by D and ending in F
+    int nouv_cons = 0;
+    for(n=0;n<6;n++){
+      if(n<4){
+        nouv_cons = constrain(S[n], 0, 100);       // we store the new value for the work then
+        //nouv_cons = constrain(n2, 0, 255);
+        nouv_cons = map(nouv_cons ,0 , 100, 0, 255); // on the new terminal value between 0 and 100%
+        values[n] =  nouv_cons; //(50 - (nouv_cons / 2)); // it converts the value 0-100% in no phase delay
+        analogWrite(output[n], values[n] );
+      }else{
+        nouv_cons = constrain(S[n], 0, 1);       // we store the new value for the work then
+        
+      // // Serial.print("#");
+      //  Serial.print(nouv_cons);
+      //  Serial.print("#");
+        
+        if(nouv_cons == 0){
+            values[n] = LOW;
+        }else{
+            values[n] = HIGH;
+        }
+        digitalWrite(output[n],values[n]);
+      }
+    }
+  }
+}
+
+
+// this method makes a HTTP connection to the server:
+void httpRequest(String data) {
+  // if there's a successful connection:
+  String url = "/data.aspx?command=Save&action="+tipo_sonda + data;
+  Serial.println(url);
+  if (client.connect(Yun, 1337)) {
+    Serial.println("connecting=" + url);
+    // send the HTTP PUT request:
+    client.println("GET  " + url + " HTTP/1.1");
+    client.println("Host: mipaloma.ewebmail.es");
+    client.println("User-Agent: arduino-ethernet");
+    client.println("Connection: close");
+    client.println();
+    ConnectionFail = false;
+    // note the time that the connection was made:
+    //lastConnectionTime = millis();
+  }else{
+    // if you couldn't make a connection:
+    Serial.println("connection failed");
+    Serial.println("disconnecting.");
+    ConnectionFail = true;
+    client.stop();
+  }
+}
