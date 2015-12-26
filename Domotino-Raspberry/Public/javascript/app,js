@@ -1,0 +1,95 @@
+$(document).ready(function () {
+    var App = {
+        lecturas: [],
+        prediciones: {},
+        _counter: 0,
+        constructor: {
+            listen: function (app, callback) {
+                app.socket = io.connect('http://192.168.1.229:8000')
+                app.socket.on('this', function (data) {
+                    callback._this(app, data)
+                })
+                app.socket.on('weather', function (data) {
+                    
+
+                    console.log(data)
+                })
+                $(callback.events).each(function (i, e) {
+                    App.socket.on(e.title,
+                        function (data) {
+                            e.callback(app, data)
+                            app.constructor.painter.sondas(data.lectura._s,data.lectura)
+                            app.constructor.painter.weather(data.weather.current_observation)
+
+                        })
+                })
+                app.callback = callback.functions
+                
+            },
+            painter: {
+                escenario: function (sondas) {
+                    sondas.forEach(function (value, i) {
+                        var title = ""
+                        if (value != null)
+                            title = value.title
+
+                        if($('#Sonda_'+i).length==0){
+                            $Sonda = $('<div id="Sonda_' + i + '" class="Sonda">')
+                            $Title = $('<span class="title">').html(title)
+                            $Tempreratura = $('<p class="Temperatura">')
+                            $Humedad = $('<p class="Humedad">')
+                            $Prediccion = $('<p class="prediccion">')
+                            $Sonda.append($Title).append($Tempreratura).append($Humedad).append($Prediccion)
+                            $("#Framework").append($Sonda)
+                        }
+                    })
+                },
+                weather: function (data) {
+                    $('#Sonda_0 .prediccion').html(data.icon)
+                    $('#Sonda_0 .Temperatura').html(data.temp_c)
+                    $('#Sonda_0 .Humedad').html(data.relative_humidity)
+                    //$('#Sonda_1 .prediccion').html(data.icon)
+                },
+                sondas: function (sonda,lectura) {
+                    $('#Sonda_' + sonda + ' .Temperatura').html(lectura.T)
+                }
+            }
+        }
+    }
+
+
+    Callback = {
+        _this: function (app, data) {
+            var date = new Date(data.date)
+            app.constructor.painter.escenario(data.Sensores)
+            app.constructor.painter.weather(data.weather.current_observation)
+            console.log(date.toLocaleString())
+        },events: [{
+            title: 'Sonda_1',
+            callback: function (app, data) {
+                console.log(data)
+                
+                //app.lecturas[data.lecturas._s] = app.callback.setDataSondas(app, data.lecturas)
+            }
+        }, {
+            title: 'Sonda_2',
+            callback: function (app, data) {
+                console.log(data)
+                //app.lecturas[data.lecturas._s] = app.callback.setDataSondas(app, data.lecturas)
+            }
+        }, {
+            title: 'Sonda_3',
+            callback: function (app, data) {
+                console.log(data)
+                //app.lecturas[data.lecturas._s] = app.callback.setDataSondas(app, data.lecturas)
+            }
+        }]
+    }
+    App.constructor.listen(App, Callback)
+
+
+    $("#sparkline").sparkline([5, 6, 7, 9, 9, 5, 3, 2, 2, 4, 6, 7], {
+        type: 'line',
+        width: '200'
+    });
+})
